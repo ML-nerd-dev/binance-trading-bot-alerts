@@ -1,0 +1,10 @@
+binance-trading-bot-alerts/
+├── app.py                      # Live dashboard + Binance + Telegram
+├── requirements.txt
+├── Dockerfile
+├── railway.json
+├── .env.example                # User fills API keys
+├── bot.py                      # Background trader (optional)
+└── assets/
+    ├── hero_premium.png
+    └── demo.gif
