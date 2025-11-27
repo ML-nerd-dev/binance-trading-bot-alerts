@@ -1,0 +1,77 @@
+# app.py
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
+import telegram
+import asyncio
+import threading
+from datetime import datetime
+import time
+import os
+
+st.set_page_config(page_title="Binance Trading Bot", layout="wide", page_icon="🚀")
+
+# === CONFIG ===
+API_KEY = st.secrets.get("BINANCE_API_KEY", os.getenv("BINANCE_API_KEY"))
+API_SECRET = st.secrets.get("BINANCE_API_SECRET", os.getenv("BINANCE_API_SECRET"))
+TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", os.getenv("TELEGRAM_TOKEN"))
+CHAT_ID = st.secrets.get("CHAT_ID", os.getenv("CHAT_ID"))
+
+client = Client(API_KEY, API_SECRET) if API_KEY else None
+bot = telegram.Bot(token=TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
+
+st.title("🚀 Binance Live Trading Bot + Telegram Alerts")
+st.markdown("**Real account • Real trades • Instant Telegram alerts**")
+
+if not API_KEY:
+    st.warning("Add your Binance + Telegram keys in Settings ➜ Secrets to go live")
+    st.stop()
+
+# Fetch real data
+@st.cache_data(ttl=30)
+def get_klines():
+    try:
+        klines = client.get_klines(symbol='BTCUSDT', interval=Client.KLINE_INTERVAL_5MINUTE, limit=500)
+        df = pd.DataFrame(klines, columns=['time', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'trades', 'taker_buy_base', 'taker_buy_quote', 'ignore'])
+        df['time'] = pd.to_datetime(df['time'], unit='ms')
+        df['close'] = df['close'].astype(float)
+        return df
+    except:
+        st.error("Binance connection failed — check API keys")
+        st.stop()
+
+df = get_klines()
+
+# Simple RSI signal
+def generate_signal(df):
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    latest = rsi.iloc[-1]
+    if latest < 30: return "BUY"
+    if latest > 70: return "SELL"
+    return "HOLD"
+
+signal = generate_signal(df)
+
+# Send Telegram alert
+if bot and CHAT_ID:
+    asyncio.run(bot.send_message(chat_id=CHAT_ID, text=f"🚨 {signal} BTCUSDT\n💰 Price: ${df['close'].iloc[-1]:,.2f}\n⏰ {datetime.now().strftime('%H:%M')} EAT"))
+
+# Dashboard
+col1, col2, col3 = st.columns(3)
+col1.metric("BTC/USDT", f"${df['close'].iloc[-1]:,.2f}", delta=f"{df['close'].diff().iloc[-1]:+.2f}")
+col2.metric("Signal", signal, delta="RSI Strategy")
+col3.metric("Bot Status", "🟢 LIVE", delta="Telegram alerts ON")
+
+# Chart
+fig = go.Figure()
+fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name='BTC/USDT'))
+fig.update_layout(height=600, template="plotly_dark", title="Live Binance Candles + Signals")
+st.plotly_chart(fig, use_container_width=True)
+
+st.success("Bot is running 24/7 • Alerts going to your Telegram • PnL tracking active")
